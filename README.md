@@ -29,6 +29,10 @@
 | **Document** (`/api/doc/*`) | Trích text từ file → AI tóm tắt/phân tích → chat hỏi đáp theo tài liệu | PDF, DOCX, TXT, MD, CSV, JSON, XML, YAML, ảnh (vision) | Session có conversation, hỏi đáp liên tục |
 | **Code** (`/api/code/*`) | AI đọc code → nhận diện ngôn ngữ, mục đích, thành phần chính, đề xuất cải thiện | Đoạn code dán trực tiếp (bất kỳ ngôn ngữ nào) | Session có conversation, hỏi đáp liên tục |
 
+> **Cách đọc bảng này:** mỗi dòng là một module của app. Cột “Làm gì” mô tả luồng xử lý chính, còn “Đầu vào/Đầu ra” cho biết bạn nạp gì vào và nhận gì về.
+
+Nói đơn giản: app này như một trợ lý ngồi ngay trong máy bạn. Bạn nộp tài liệu hoặc dán code, nó đọc rồi tóm tắt, và bạn hỏi tiếp thoải mái như chat với đồng nghiệp.
+
 Điểm đáng giá nhất: **dữ liệu không rời khỏi máy bạn**. Ollama chạy `localhost`, Flask chạy `localhost` — không có byte nào được gửi ra internet, phù hợp với tài liệu nội bộ, code doanh nghiệp, dữ liệu cần bảo mật.
 
 ### Tính năng chính
@@ -52,11 +56,19 @@
 | Phân tích ảnh chụp UI, sơ đồ, bảng biểu (vision model) | Tìm kiếm semantic trên kho tài liệu (không có vector DB) |
 | Môi trường offline / không được gửi code ra ngoài | Nhiều người dùng đồng thời (session lưu trong RAM, không có auth) |
 
+> **Cách đọc bảng này:** cột trái là việc app làm tốt ngay từ đầu, cột phải là việc nên dùng công cụ khác — đọc từng dòng đối chiếu trái/phải sẽ thấy giới hạn tương ứng.
+
+> **Tóm gọn 1 câu:** DocAnalyzer là trợ lý AI chạy 100% trên máy bạn, giỏi tóm tắt và hỏi đáp từng file, nhưng không phải công cụ xử lý hàng loạt hay tìm kiếm đa tài liệu.
+
 ---
 
 ## 🏗️ Kiến trúc tổng quan
 
+Phần này cho bạn biết app gồm những mảnh ghép nào và chúng bắt tay nhau ra sao — hữu ích khi muốn sửa code hay debug.
+
 Ứng dụng là một **monolith Flask đơn giản** — không database, không message queue, không dịch vụ ngoài ngoài trừ Ollama local.
+
+“Monolith” nghĩa là tất cả nằm trong một cục duy nhất. Giống một quán ăn một bếp: đơn giản, dễ quản lý, đủ dùng cho quy mô nhỏ.
 
 ```mermaid
 flowchart LR
@@ -69,6 +81,8 @@ flowchart LR
 ```
 
 ### Luồng xử lý một file tài liệu
+
+Sơ đồ dưới đây là “hành trình” của một file từ lúc upload đến lúc trả kết quả:
 
 ```mermaid
 flowchart TD
@@ -97,6 +111,8 @@ flowchart TD
 | `call_ollama()` | Gọi `/api/chat` của Ollama | temperature 0.2, num_predict 4096, timeout 180s |
 | `analyze_with_ollama()` | Prompt phân tích (khác nhau cho code/tài liệu) | Cắt nội dung còn 15.000 ký tự |
 
+> **Cách đọc bảng này:** mỗi dòng là một “núm vặn” trong `app.py`. Muốn đổi hành vi app, hãy bắt đầu từ cột “Thành phần” rồi xem giá trị mặc định ở cột phải.
+
 ### Tách lớp prompt
 
 Hai system prompt riêng biệt trong `analyze_with_ollama()`:
@@ -106,9 +122,15 @@ Hai system prompt riêng biệt trong `analyze_with_ollama()`:
 
 Ở chế độ chat, system prompt được dựng lại mỗi lượt với toàn bộ nội dung file (`session['text']`) — đây là cách "RAG giả lập" bằng context window, đơn giản nhưng giới hạn bởi dung lượng context của model.
 
+System prompt là “ghi chú dán lên bàn làm việc” của AI: mỗi lần trả lời, nó lại được nhắc nhìn vào ghi chú đó trước. RAG là kỹ thuật tìm đoạn tài liệu liên quan rồi đưa cho AI; ở đây app đưa cả tài liệu một lần, đơn giản hơn nhưng tốn chỗ.
+
+> **Tóm gọn 1 câu:** App là một cục Flask duy nhất: trình duyệt gọi API, Flask gọi Ollama local, session nằm trong RAM — không dịch vụ ngoài nào khác.
+
 ---
 
 ## 📋 Yêu cầu hệ thống
+
+Phần này liệt kê những gì máy bạn cần có trước khi cài. Đọc kỹ để đỡ mất thời gian debug sau này.
 
 | Thành phần | Phiên bản | Ghi chú | Link |
 |---|---|---|---|
@@ -116,6 +138,8 @@ Hai system prompt riêng biệt trong `analyze_with_ollama()`:
 | **Flask** | **3.1.3** (pin trong requirements.txt) | 3.1.3 là bản fix bảo mật (CVE-2026-27205 ảnh hưởng mọi bản < 3.1.3) — đừng dùng 3.1.1 trở xuống | https://flask.palletsprojects.com/ |
 | **Ollama** | **v0.40.x** (10/2026) | Bản mới nhất tại thời điểm viết: v0.40.5 (15/10/2026) | https://ollama.com |
 | **Model Ollama** | tuỳ chọn | Mặc định app dùng `qwen2.5-coder:14b`; bản vision cần model hỗ trợ ảnh (VD `qwen2.5vl`, `llava`) | https://ollama.com/library |
+
+> **Cách đọc bảng này:** mỗi dòng là một phần mềm cần cài. Cột “Phiên bản” cho biết dùng bản nào, cột “Ghi chú” giải thích vì sao.
 
 > **Vì sao pin đúng version Flask?** Flask 3.1.3 (19/02/2026) vá lỗi session không đánh dấu "đã truy cập" khi chỉ đọc key bằng `in`/`len` — khiến header `Vary: Cookie` bị thiếu và có thể dẫn tới cache poisoning. Bản 3.1.1 trong repo cũ đã lỗi thời về bảo mật.
 
@@ -127,23 +151,15 @@ Hai system prompt riêng biệt trong `analyze_with_ollama()`:
 
 ### 1. Di chuyển vào thư mục project
 
-```bash
-cd tutorial-doc-analyzer
-```
+> 📄 **Code ví dụ:** [`examples/01-1-di-chuyen-vao-thu-muc-project.sh`](examples/01-1-di-chuyen-vao-thu-muc-project.sh)
 
 ### 2. (Khuyến nghị) Tạo virtual environment
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate        # macOS / Linux
-# .venv\Scripts\activate         # Windows PowerShell
-```
+> 📄 **Code ví dụ:** [`examples/02-2-khuyen-nghi-tao-virtual-environment.sh`](examples/02-2-khuyen-nghi-tao-virtual-environment.sh)
 
 ### 3. Cài Python dependencies
 
-```bash
-pip3 install -r requirements.txt
-```
+> 📄 **Code ví dụ:** [`examples/03-3-cai-python-dependencies.sh`](examples/03-3-cai-python-dependencies.sh)
 
 Nội dung `requirements.txt`:
 
@@ -163,40 +179,23 @@ python-docx==1.1.2
 | `PyPDF2` | Trích text từ PDF |
 | `python-docx` | Trích text từ DOCX/DOC |
 
+> **Cách đọc bảng này:** mỗi dòng là một gói Python mà app cần. Cột phải cho biết gói đó đảm nhiệm việc gì trong app.
+
 > **Lưu ý macOS:** `python-magic` cần `libmagic`: `brew install libmagic` nếu import lỗi.
 
 ### 4. Cài Ollama + model
 
-```bash
-# macOS: brew install ollama  (hoặc tải app tại ollama.com/download)
-# Sau đó đảm bảo server đang chạy:
-ollama serve          # hoặc mở app Ollama trong menu bar
-
-# Liệt kê model đã cài
-ollama list
-
-# Cài model mặc định của app + 1 model khác để thử
-ollama pull qwen2.5-coder:14b
-ollama pull deepseek-r1:14b
-
-# Muốn phân tích ảnh? Cài vision model:
-ollama pull qwen2.5vl:7b
-```
+> 📄 **Code ví dụ:** [`examples/04-4-cai-ollama-model.sh`](examples/04-4-cai-ollama-model.sh)
 
 ### 5. Kiểm tra Ollama phản hồi
 
-```bash
-curl http://localhost:11434/api/tags
-# JSON danh sách model = Ollama sẵn sàng
-```
+> 📄 **Code ví dụ:** [`examples/05-5-kiem-tra-ollama-phan-hoi.sh`](examples/05-5-kiem-tra-ollama-phan-hoi.sh)
 
 ---
 
 ## 🚀 Chạy ứng dụng
 
-```bash
-python3 app.py
-```
+> 📄 **Code ví dụ:** [`examples/06-chay-ung-dung.sh`](examples/06-chay-ung-dung.sh)
 
 Output mong đợi:
 
@@ -216,9 +215,15 @@ Mở trình duyệt tại: **http://127.0.0.1:5001**
 | Port | `5001` | Tránh xung đột AirPlay Receiver (port 5000/5001) trên macOS |
 | Debug | `true` | Auto-reload khi sửa code — **tắt khi dùng thật** (`debug=False`) |
 
+> **Cách đọc bảng này:** ba dòng là ba thông số khi khởi động server. Đổi giá trị trong lệnh chạy `app.py` nếu muốn khác.
+
+> **Tóm gọn 1 câu:** Chạy `python3 app.py` rồi mở `http://127.0.0.1:5001` là xong — nhớ tắt debug trước khi dùng thật.
+
 ---
 
 ## 🎮 Cách sử dụng qua WebUI
+
+Phần này là hướng dẫn bấm nút từng bước. Làm theo đúng thứ tự 1→6 là chạy được ngay.
 
 1. **Mở** http://127.0.0.1:5001
 2. **Chọn model** AI từ dropdown (danh sách lấy từ `GET /api/models`; mặc định `qwen2.5-coder:14b`)
@@ -233,9 +238,13 @@ Mẹo dùng hiệu quả:
 - File **ảnh** cần model hỗ trợ vision; nếu model thường nhận, app sẽ fallback trả lời "Image uploaded. You can ask questions about it."
 - Mỗi session là độc lập: muốn phân tích file thứ hai mà không mất hội thoại cũ thì không được — app chỉ giữ 1 session mỗi module cùng lúc trên UI (bấm thùng rác để reset).
 
+> **Tóm gọn 1 câu:** Mở trang, chọn model, upload file — AI tự phân tích; sau đó cứ hỏi đáp thoải mái, và bấm thùng rác khi muốn bắt đầu lại.
+
 ---
 
 ## 🔌 API Endpoints
+
+Phần này dành cho ai muốn gọi API trực tiếp (script, Postman, curl) thay vì bấm trên UI.
 
 Danh sách dưới đây **khớp 1-1 với các route trong `app.py`** (đã đối chiếu 28/10/2026):
 
@@ -249,6 +258,8 @@ Danh sách dưới đây **khớp 1-1 với các route trong `app.py`** (đã đ
 | POST | `/api/code/analyze` | Phân tích đoạn code | JSON: `code` (bắt buộc), `language` (tuỳ chọn, mặc định `auto-detect`), `model` (tuỳ chọn) | `session_id`, `language`, `analysis`, `code_preview` |
 | POST | `/api/code/chat` | Hỏi đáp về code đã phân tích | JSON: `session_id`, `question`, `model` (tuỳ chọn) | `{"answer": "..."}` |
 | POST | `/api/code/session/<session_id>/clear` | Xoá hội thoại của session code | — | `{"success": true}` |
+
+> **Cách đọc bảng này:** mỗi dòng là một đường API. Luồng điển hình: `upload`/`analyze` trước để lấy `session_id`, rồi dùng `session_id` đó cho các lệnh `chat` sau.
 
 ### Chi tiết từng endpoint
 
@@ -290,88 +301,47 @@ Tương tự `/api/doc/chat` nhưng system prompt chứa toàn bộ đoạn code
 
 Xoá hội thoại (giữ nguyên nội dung file/code). Session không tồn tại → `404`.
 
+Endpoint `clear` giống bấm nút “xoá bảng trắng”: hội thoại biến mất, nhưng tài liệu/code vẫn còn nguyên.
+
+> **Tóm gọn 1 câu:** 8 endpoint, hai nhóm doc/code song song: một lệnh phân tích/upload để lấy `session_id`, một lệnh chat, và một lệnh clear.
+
 ---
 
 ## 🧪 Ví dụ curl đầy đủ
 
+Phần này là 7 lệnh curl mẫu, mỗi lệnh minh họa một endpoint ở trên. Copy — chạy — xem kết quả.
+
 ### 1. Xem model khả dụng
 
-```bash
-curl http://127.0.0.1:5001/api/models
-# {"models":["qwen2.5-coder:14b","deepseek-r1:14b"]}
-```
+> 📄 **Code ví dụ:** [`examples/07-1-xem-model-kha-dung.sh`](examples/07-1-xem-model-kha-dung.sh)
 
 ### 2. Upload tài liệu + nhận phân tích tự động
 
-```bash
-curl -F "file=@report.pdf" \
-     -F "model=qwen2.5-coder:14b" \
-     http://127.0.0.1:5001/api/doc/upload
-```
+> 📄 **Code ví dụ:** [`examples/08-2-upload-tai-lieu-nhan-phan-tich-tu.sh`](examples/08-2-upload-tai-lieu-nhan-phan-tich-tu.sh)
 
 Phản hồi mẫu:
 
-```json
-{
-  "session_id": "3f9c2a7e8b1d4f60a1c2e5d7b9f01234",
-  "filename": "report.pdf",
-  "file_type": "document",
-  "analysis": "Tài liệu này là báo cáo tài chính Q3... (tóm tắt do AI tạo)",
-  "text_preview": "BÁO CÁO TÀI CHÍNH QUÝ 3... (500 ký tự đầu)"
-}
-```
+> 📄 **Code ví dụ:** [`examples/09-2-upload-tai-lieu-nhan-phan-tich-tu.json`](examples/09-2-upload-tai-lieu-nhan-phan-tich-tu.json)
 
 ### 3. Chat hỏi đáp về tài liệu (dùng `session_id` vừa nhận)
 
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"session_id": "3f9c2a7e8b1d4f60a1c2e5d7b9f01234", "question": "Tóm tắt tài liệu này"}' \
-  http://127.0.0.1:5001/api/doc/chat
-# {"answer": "..."}
-
-# Đổi model chỉ cho 1 lượt hỏi:
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"session_id": "3f9c...", "question": "Rủi ro lớn nhất?", "model": "deepseek-r1:14b"}' \
-  http://127.0.0.1:5001/api/doc/chat
-```
+> 📄 **Code ví dụ:** [`examples/10-3-chat-hoi-ap-ve-tai-lieu-dung.sh`](examples/10-3-chat-hoi-ap-ve-tai-lieu-dung.sh)
 
 ### 4. Upload ảnh cho vision model
 
-```bash
-curl -F "file=@screenshot.png" \
-     -F "model=qwen2.5vl:7b" \
-     http://127.0.0.1:5001/api/doc/upload
-# file_type sẽ là "image"
-```
+> 📄 **Code ví dụ:** [`examples/11-4-upload-anh-cho-vision-model.sh`](examples/11-4-upload-anh-cho-vision-model.sh)
 
 ### 5. Phân tích đoạn code
 
-```bash
-cat > /tmp/snippet.json <<'EOF'
-{"code": "def add(a, b):\n    return a + b", "language": "python"}
-EOF
-
-curl -X POST -H "Content-Type: application/json" \
-  -d @/tmp/snippet.json \
-  http://127.0.0.1:5001/api/code/analyze
-# {"session_id": "...", "language": "python", "analysis": "...", "code_preview": "..."}
-```
+> 📄 **Code ví dụ:** [`examples/12-5-phan-tich-oan-code.sh`](examples/12-5-phan-tich-oan-code.sh)
 
 ### 6. Chat về code
 
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"session_id": "<id-từ-bước-5>", "question": "Hàm này có edge case nào không?"}' \
-  http://127.0.0.1:5001/api/code/chat
-```
+> 📄 **Code ví dụ:** [`examples/13-6-chat-ve-code.sh`](examples/13-6-chat-ve-code.sh)
 
 ### 7. Xoá hội thoại session
 
-```bash
-curl -X POST http://127.0.0.1:5001/api/doc/session/<session_id>/clear
-curl -X POST http://127.0.0.1:5001/api/code/session/<session_id>/clear
-# {"success": true}   (session không tồn tại -> 404)
-```
+> 📄 **Code ví dụ:** [`examples/14-7-xoa-hoi-thoai-session.sh`](examples/14-7-xoa-hoi-thoai-session.sh)
 
 ---
 
@@ -391,9 +361,13 @@ tutorial-doc-analyzer/
 
 Không có file nào khác cần deploy — toàn bộ logic nằm trong `app.py` (~384 dòng), UI là 1 trang HTML.
 
+> **Tóm gọn 1 câu:** Toàn bộ app gói gọn trong `app.py` + một trang HTML + một file CSS — copy 5 file này là đủ chạy.
+
 ---
 
 ## 📝 Ghi chú kỹ thuật
+
+Phần này là “bảng thông số kỹ thuật” cho ai cần tra nhanh giá trị và hành vi chính xác của app.
 
 | Hạng mục | Giá trị / hành vi | Trong code ở đâu |
 |---|---|---|
@@ -408,38 +382,33 @@ Không có file nào khác cần deploy — toàn bộ logic nằm trong `app.py
 | Tên file đã lưu | `{uuid4-hex}_{tên-gốc}` sau `secure_filename` | `/api/doc/upload` |
 | Vision fallback | Model không hỗ trợ ảnh → session vẫn tạo, trả lời "Image uploaded. You can ask questions about it." | `/api/doc/upload` |
 
+> **Cách đọc bảng này:** mỗi dòng là một giới hạn hay tham số. Cột giữa nói giá trị cụ thể, cột phải chỉ chỗ trong code để sửa khi cần.
+
 > **Giới hạn đã biết (không phải bug):** session trong RAM → restart mất hết; 1 file/session; không có auth ai cũng gọi được API; nội dung > 15k ký tự bị cắt. Muốn khắc phục — xem phần Mở rộng.
+
+> **Tóm gọn 1 câu:** App cố tình đơn giản: mọi giới hạn (50 MB, 15k ký tự, 10 lượt, RAM-only) đều ghi rõ trong bảng trên và sửa được trong `app.py`.
 
 ---
 
 ## 🐛 Troubleshooting
 
+Phần này là “sổ tay ứng biến” khi app không chạy như mong đợi. Tìm đúng dấu hiệu, làm theo lời khắc.
+
 ### Port 5001 đã được sử dụng?
 
-```bash
-# Kiểm tra process đang dùng port
-lsof -i :5001
-
-# Kill process
-kill -9 <PID>
-```
+> 📄 **Code ví dụ:** [`examples/15-port-5001-a-uoc-su-dung.sh`](examples/15-port-5001-a-uoc-su-dung.sh)
 
 Trên macOS, **AirPlay Receiver** thường chiếm port 5000/5001. Tắt tại: *System Settings → General → AirDrop & Handoff → AirPlay Receiver*, hoặc đổi port trong `app.py` (`app.run(..., port=5002)`).
 
+> **Tóm gọn 1 câu:** Port 5001 bị chiếm thì tắt AirPlay Receiver hoặc đổi sang port khác trong `app.py`.
+
 ### Ollama không kết nối được?
 
-```bash
-# Kiểm tra Ollama đang chạy
-ollama list
-
-# Khởi động Ollama nếu cần
-ollama serve
-
-# Kiểm tra API phản hồi
-curl http://localhost:11434/api/tags
-```
+> 📄 **Code ví dụ:** [`examples/16-ollama-khong-ket-noi-uoc.sh`](examples/16-ollama-khong-ket-noi-uoc.sh)
 
 Lỗi `"Cannot connect to Ollama. Make sure Ollama is running"` → Ollama chưa chạy hoặc chạy ở địa chỉ khác (sửa `OLLAMA_URL` trong `app.py`). Lỗi 404 khi gọi model → model chưa tải: `ollama pull <model>`.
+
+> **Tóm gọn 1 câu:** Không kết nối được Ollama thì kiểm tra nó đang chạy chưa, đúng địa chỉ chưa; lỗi 404 thì tải model bằng `ollama pull`.
 
 ### Model trả lời chậm / timeout
 
@@ -448,28 +417,35 @@ Lỗi `"Cannot connect to Ollama. Make sure Ollama is running"` → Ollama chưa
 - Timeout mặc định 180 giây — file gần 15.000 ký tự + model lớn có thể chạm ngưỡng.
 - Mac Apple Silicon: bản Ollama mới (v0.40.x) dùng Metal/mlx — cập nhật Ollama lên bản mới để tăng tốc.
 
+> **Tóm gọn 1 câu:** Trả lời chậm thì giảm cỡ model, kiểm tra RAM, và nâng cấp Ollama để tận dụng tăng tốc trên Mac.
+
 ### Lỗi cài `python-magic` trên macOS
 
-```bash
-brew install libmagic
-pip3 install python-magic
-```
+> 📄 **Code ví dụ:** [`examples/17-loi-cai-python-magic-tren-macos.sh`](examples/17-loi-cai-python-magic-tren-macos.sh)
 
 ### File upload bị từ chối "File type not supported"
 
 Kiểm tra phần mở rộng thuộc danh sách cho phép: `txt, pdf, docx, doc, md, csv, json, xml, yaml, yml, png, jpg, jpeg, gif, bmp, tiff, webp`. Lưu ý: đuôi **`.doc` cũ** được python-docx mở bằng `docx.Document()` — một số file `.doc` nhị phân rất cũ có thể trích text lỗi (app trả 400 và xoá file).
 
+> **Tóm gọn 1 câu:** Bị chặn loại file thì đổi đuôi về danh sách cho phép; file `.doc` quá cũ có thể không đọc được.
+
 ### Upload thành công nhưng "analysis" trống với ảnh
 
 Model đang chọn không hỗ trợ vision. Chuyển sang model vision (VD `qwen2.5vl:7b`, `llava`) trong dropdown rồi upload lại. App cố tình không báo lỗi mà trả lời giữ chỗ để bạn vẫn chat được.
+
+> **Tóm gọn 1 câu:** Ảnh phân tích ra trống là do model không “biết nhìn” — đổi sang model vision rồi upload lại.
 
 ### Trả lời bị "quên" nội dung đầu tài liệu
 
 Nội dung > 15.000 ký tự bị cắt. Cách xử lý: tách file, hoặc tăng `max_chars` trong `analyze_with_ollama()` nếu model của bạn có context lớn (kiểm tra bằng `ollama show <model>`).
 
+> **Tóm gọn 1 câu:** AI “quên” phần đầu vì file quá dài bị cắt ở 15.000 ký tự — tách nhỏ file hoặc nới giới hạn nếu model chứa nổi.
+
 ---
 
 ## 🚀 Mở rộng — ý tưởng phát triển tiếp
+
+Phần này là “tủ đồ lên cấp” cho app, nếu bạn muốn vượt qua các giới hạn vừa nêu.
 
 | Hướng | Làm gì | Vì sao đáng làm |
 |---|---|---|
@@ -481,6 +457,10 @@ Nội dung > 15.000 ký tự bị cắt. Cách xử lý: tách file, hoặc tăn
 | **Docker hoá** | Dockerfile + compose (app + Ollama) | Triển khai 1 lệnh, sạch máy |
 | **Batch mode CLI** | Script gọi `/api/doc/upload` cho cả thư mục | Xử lý hàng loạt báo cáo |
 | **Export hội thoại** | Endpoint tải conversation ra Markdown | Lưu kết quả phân tích vào repo/PM tool |
+
+> **Cách đọc bảng này:** mỗi dòng là một hướng nâng cấp. Cột giữa là việc phải làm, cột phải là lợi ích thu được — chọn theo giới hạn bạn đang khó chịu nhất.
+
+Chunking + RAG thật giải thích thêm: thay vì nhồi cả cuốn sách vào bộ nhớ AI, ta cắt nhỏ thành từng đoạn, tìm đoạn liên quan nhất rồi chỉ đưa đoạn đó — như tra mục lục thay vì đọc cả cuốn.
 
 ---
 
@@ -495,5 +475,7 @@ Nội dung > 15.000 ký tự bị cắt. Cách xử lý: tách file, hoặc tăn
 ---
 
 > **Chốt:** DocAnalyzer là ví dụ gọn nhất để thấy một app AI local hoàn chỉnh chỉ cần ~400 dòng Python: Flask làm "cầu" giữa trình duyệt và Ollama, session in-memory giữ ngữ cảnh, và toàn bộ dữ liệu ở lại trên máy bạn. Cài Ollama + `pip install -r requirements.txt` + `python3 app.py` — xong trong 5 phút.
+
+> **Tóm gọn 1 câu:** Tham khảo thêm tài liệu chính thức của Flask, Ollama, PyPDF2 và python-docx tại các link trên.
 
 
